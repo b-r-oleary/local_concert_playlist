@@ -2,17 +2,12 @@ import os
 import time
 
 import numpy as np
-
-from seatgeek_api import (
-    SeatGeekAPI,
-    group_events_by_performers
-)
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy.util
 
 
-class Playlist(object):
+class SpotifyPlaylist(object):
     credentials = {
         env_var: os.getenv(env_var)
         for env_var in [
@@ -20,16 +15,13 @@ class Playlist(object):
             'SPOTIFY_USER_SCOPE',
             'SPOTIFY_REDIRECT_URI',
             'SPOTIFY_CLIENT_ID',
-            'SPOTIFY_CLIENT_SECRET',
-            'SEATGEEK_CLIENT_ID',
-            'SEATGEEK_CLIENT_SECRET'
+            'SPOTIFY_CLIENT_SECRET'
         ]
     }
     spotify_request_timeout = .03
 
     def __init__(self):
         self.spotify = self._get_spotify_connection()
-        self.seatgeek = self._get_seatgeek_connection()
 
     def _get_spotify_connection(self):
         user_token = spotipy.util.prompt_for_user_token(
@@ -49,13 +41,6 @@ class Playlist(object):
         )
         return spotify
 
-    def _get_seatgeek_connection(self):
-        seatgeek = SeatGeekAPI(
-            self.credentials['SEATGEEK_CLIENT_ID'],
-            self.credentials['SEATGEEK_CLIENT_SECRET']
-        )
-        return seatgeek
-
     def _filter_tracks(self,
                        tracks,
                        limit=100,
@@ -67,7 +52,7 @@ class Playlist(object):
         else:
             if likelihood is None:
                 def popularity_likelihood(track):
-                    popularity = float(track['sp_track_popularity'])
+                    popularity = float(track['track_popularity'])
                     if popularity < offset_popularity:
                         return offset_popularity
                     else:
@@ -87,19 +72,29 @@ class Playlist(object):
 
         return sorted(
             selected_tracks,
-            key=lambda track: track['sp_track_popularity']
+            key=lambda track: track['track_popularity']
         )
+
+    def _deduplicate_tracks(self, tracks):
+        tuple_tracks = [tuple(track.items()) for track in tracks]
+        return [
+            dict(tuple_track) for tuple_track in set(tuple_tracks)
+        ]
 
     def _get_tracks_for_events(self,
                                events,
                                max_tracks_per_performer=2):
 
-        performers = group_events_by_performers(events)
+        performer_names = set(
+            performer.name for event in events
+            for performer in event.performers
+        )
+
         tracks = []
 
-        for pid, performer in performers.iteritems():
+        for performer_name in performer_names:
             artist_search_results = self.spotify.search(
-                performer['name'],
+                performer_name,
                 type='artist'
             )
             artists = artist_search_results['artists']['items']
@@ -116,18 +111,16 @@ class Playlist(object):
                     break
 
                 tracks.append({
-                    'sg_performer_id': pid,
-                    'sg_performer_name': performer['name'],
-                    'sg_performer_popularity': performer['popularity'],
-                    'sp_artist_id': artist_id,
-                    'sp_track_id': top_track['id'],
-                    'sp_track_uri': top_track['uri'],
-                    'sp_track_name': top_track['name'],
-                    'sp_track_popularity': top_track['popularity']
+                    'performer_name': performer_name,
+                    'artist_id': artist_id,
+                    'track_id': top_track['id'],
+                    'track_uri': top_track['uri'],
+                    'track_name': top_track['name'],
+                    'track_popularity': top_track['popularity']
                 })
 
             time.sleep(self.spotify_request_timeout)
-        return tracks
+        return self._deduplicate_tracks(tracks)
 
     def select_tracks_for_events(self,
                                  events,
@@ -158,7 +151,7 @@ class Playlist(object):
         updated_playlist = self.spotify.user_playlist_add_tracks(
             spotify_username,
             playlist['id'],
-            [track['sp_track_uri']
+            [track['track_uri']
              for track in tracks]
         )
         return updated_playlist
