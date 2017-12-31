@@ -2,7 +2,7 @@ import sys
 import datetime
 import logging
 
-from local_concert_playlist import playlist
+from local_concert_playlist import Playlist
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
